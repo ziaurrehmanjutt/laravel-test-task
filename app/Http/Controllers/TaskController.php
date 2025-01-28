@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Task;
 use App\Mail\TaskExecutedMail;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -15,14 +16,28 @@ class TaskController extends Controller
     // Method to store a new task
     public function store(Request $request)
     {
-        $validated = $request->validate([
-            'api_url' => 'required|string',
-            'api_type' => 'required|in:GET,POST,PUT,DELETE,PATCH',
-            'task_name' => 'required|string',
-            'schedule_at' => 'nullable|date',
-            // Add other validations as necessary
+        $validator = Validator::make($request->all(), [
+            'api_url' => 'required|url', 
+            'api_type' => 'required|in:GET,POST,PUT,DELETE',  
+            'api_payload' => 'nullable|json',  
+            'api_parameters' => 'nullable|json',  
+            'api_headers' => 'nullable|json', 
+            'task_name' => 'required|string|max:255',  
+            // 'schedule_at' => 'required|date', 
+            'schedule_at' => 'required|date_format:Y-m-d H:i:s',
+            'response_email' => 'nullable|email', 
         ]);
+    
+        // If validation fails, return errors in JSON format
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 400);
+        }
 
+        $validated = $validator->validated();
         $task = Task::create([
             'created_ip' => $request->ip(),
             'api_url' => $validated['api_url'],
@@ -32,7 +47,7 @@ class TaskController extends Controller
             'api_headers' => $request->input('api_headers', null),
             'task_name' => $validated['task_name'],
             'task_status' => 'created',
-            'task_execute_at' => $validated['schedule_at'],
+            'schedule_at' => $validated['schedule_at'],
             'api_status' => 'pending',
             'response_email' => $request->input('response_email', null),
             'api_status_code' => null,
@@ -45,28 +60,115 @@ class TaskController extends Controller
     }
 
     // Method to retrieve tasks
-    public function index()
+    public function index(Request $request)
     {
-        $tasks = Task::all();
-        return response()->json($tasks);
+        try {
+            // Validate the input parameters for api_status and task_status
+            $validator = Validator::make($request->all(), [
+                'api_status' => 'nullable|in:pending,success,failure,in_progress', // api_status must be valid
+                'task_status' => 'nullable|in:created,completed,failed,paused,other,none', // task_status must be valid
+                'response_email' => 'nullable|email', // response_email must be a valid email format
+            ]);
+    
+            // If validation fails, return a JSON response with errors
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Validation failed',
+                    'errors' => $validator->errors(),
+                ], 400);
+            }
+    
+            // Retrieve filter parameters from the request
+            $apiStatus = $request->input('api_status');
+            $taskStatus = $request->input('task_status');
+            $responseEmail = $request->input('response_email');
+    
+            // Start building the query
+            $query = Task::query();
+    
+            // Apply filters if parameters are present
+            if ($apiStatus) {
+                $query->where('api_status', $apiStatus);
+            }
+    
+            if ($taskStatus) {
+                $query->where('task_status', $taskStatus);
+            }
+    
+            if ($responseEmail) {
+                $query->where('response_email', 'like', '%' . $responseEmail . '%'); // Partial match for email
+            }
+    
+            // Apply pagination (e.g., 10 results per page)
+            $tasks = $query->paginate(10);
+    
+            // Return the paginated tasks as a JSON response
+            return response()->json($tasks);
+    
+        } catch (\Exception $e) {
+            // Catch any exceptions and return an error response
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred while fetching tasks',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
     }
 
     // Method to update task status
     public function updateStatus($id, Request $request)
     {
-        $task = Task::findOrFail($id);
-        $task->update([
-            'task_status' => $request->input('task_status', $task->task_status),
-            'api_status_code' => $request->input('api_status_code', $task->api_status_code),
-            'api_response' => $request->input('api_response', $task->api_response),
-            'api_status' => $request->input('api_status', $task->api_status),
-            'failed_error' => $request->input('failed_error', $task->failed_error),
+        $validator = Validator::make($request->all(), [
+            'task_status' => 'nullable|in:created,completed,failed,paused,other,none', 
+            'api_status_code' => 'nullable|integer',
+            'api_response' => 'nullable|string', 
+            'api_status' => 'nullable|in:pending,success,failure,in_progress',
+            'failed_error' => 'nullable|string', 
+            'response_email' => 'nullable|email',
+            'task_execute_at' => 'nullable|date_format:Y-m-d H:i:s', 
         ]);
+    
+    
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 400);
+        }
+    
+ 
+        try {
+            // Find the task or fail if not found
+            $task = Task::findOrFail($id);
+    
 
-        return response()->json([
-            'message' => 'Task updated successfully',
-            'task' => $task
-        ]);
+            $task->update([
+                'task_status' => $request->input('task_status', $task->task_status),
+                'api_status_code' => $request->input('api_status_code', $task->api_status_code),
+                'api_response' => $request->input('api_response', $task->api_response),
+                'api_status' => $request->input('api_status', $task->api_status),
+                'failed_error' => $request->input('failed_error', $task->failed_error),
+                'response_email' => $request->input('response_email', $task->response_email),
+                'task_execute_at' => $request->input('task_execute_at', $task->task_execute_at),
+            ]);
+    
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Task updated successfully',
+                'task' => $task,
+            ], 200);
+    
+        } catch (\Exception $e) {
+
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred while updating the task',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
     }
 
     public function executeTask($id)
@@ -78,22 +180,27 @@ class TaskController extends Controller
             // Construct the API call based on the task's type (GET, POST, etc.)
             $response = null;
             $status_code = null;
+            $headers = $task->api_headers ? $task->api_headers : [];
+            $payload = $task->api_payload ? $task->api_payload : [];
 
+            $apiReq = $response = Http::withHeaders($headers)
+            ->withoutVerifying(); //Disable SSL on Local Testing only
             switch (strtoupper($task->api_type)) {
+
                 case 'POST':
-                    $response = Http::withHeaders($task->api_headers)->post($task->api_url, $task->api_payload);
+                    $response = $apiReq->post($task->api_url, $payload);
                     break;
                 case 'GET':
-                    $response = Http::withHeaders($task->api_headers)->get($task->api_url, $task->api_parameters);
+                    $response = $apiReq->get($task->api_url, $task->api_parameters);
                     break;
                 case 'PUT':
-                    $response = Http::withHeaders($task->api_headers)->put($task->api_url, $task->api_payload);
+                    $response = $apiReq->put($task->api_url, $payload);
                     break;
                 case 'DELETE':
-                    $response = Http::withHeaders($task->api_headers)->delete($task->api_url, $task->api_parameters);
+                    $response = $apiReq->delete($task->api_url, $task->api_parameters);
                     break;
                 case 'PATCH':
-                    $response = Http::withHeaders($task->api_headers)->patch($task->api_url, $task->api_payload);
+                    $response = $apiReq->patch($task->api_url, $payload);
                     break;
                 default:
                     throw new \Exception("Unsupported API method");
@@ -110,13 +217,10 @@ class TaskController extends Controller
                 'api_response' => ($api_response),
             ]);
 
-            // Optionally, send email with the response (if response_email is provided)
+            
             if ($task->response_email) {
-                // Use a mail service to send the response back to the user
-                // Instead of sending the email immediately:
-                Mail::to($task->response_email)->send(new TaskExecutedMail($task));
-
-                // You can queue the email for later:
+                //Send email to user 
+                //Add Email to Que to send 
                 Mail::to($task->response_email)->queue(new TaskExecutedMail($task));
             }
 

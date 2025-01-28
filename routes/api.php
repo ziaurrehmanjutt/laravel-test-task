@@ -14,13 +14,8 @@ use App\Http\Controllers\TaskController;
 |
 */
 
-Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
-    return $request->user();
-});
-
 
 
 Route::post('/tasks', [TaskController::class, 'store']); // Create a new task
 Route::get('/tasks', [TaskController::class, 'index']); // List all tasks
-Route::put('/tasks/{id}', [TaskController::class, 'updateStatus']); // Update task status
-Route::post('/tasks/{id}/execute', [TaskController::class, 'executeTask']); // Execute task
+Route::post('/tasks/{id}', [TaskController::class, 'updateStatus']); // Update task status

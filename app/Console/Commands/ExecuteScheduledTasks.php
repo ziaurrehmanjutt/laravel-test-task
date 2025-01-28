@@ -19,6 +19,8 @@ class ExecuteScheduledTasks extends Command
 
     public function handle()
     {
+
+        $this->info("time is" . Carbon::now());
         // Get all tasks that need to be executed (scheduled in the past and are not completed or failed)
         $tasks = Task::where('schedule_at', '<=', Carbon::now())
             ->whereIn('task_status', ['created', 'paused'])
