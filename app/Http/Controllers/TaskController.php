@@ -4,13 +4,13 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Task;
-
+use App\Mail\TaskExecutedMail;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-
+use Illuminate\Support\Facades\Mail;
 class TaskController extends Controller
 {
-   
+
 
     // Method to store a new task
     public function store(Request $request)
@@ -113,14 +113,17 @@ class TaskController extends Controller
             // Optionally, send email with the response (if response_email is provided)
             if ($task->response_email) {
                 // Use a mail service to send the response back to the user
-                \Mail::to($task->response_email)->send(new TaskExecutedMail($task));
+                // Instead of sending the email immediately:
+                Mail::to($task->response_email)->send(new TaskExecutedMail($task));
+
+                // You can queue the email for later:
+                Mail::to($task->response_email)->queue(new TaskExecutedMail($task));
             }
 
             return response()->json([
                 'message' => 'Task executed successfully.',
                 'task' => $task
             ]);
-
         } catch (\Exception $e) {
             // In case of an error, log and update task status
             Log::error('Error executing task: ' . $e->getMessage());
